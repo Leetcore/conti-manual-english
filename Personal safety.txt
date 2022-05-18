@@ -1,0 +1,8 @@
+I think everyone here is working through a virtual machine. Therefore, I advise to install a virtual machine on a crypted volume with VeraCrypt.
+1 download Veracrypt
+2 you will need to allocate space on your disk for the file / or encrypt the entire disk at once
+Important rule - you will have to install virtual machine again, because unfortunately crypting your old working virtual machine will have an unrecoverable bug in your code and it will not start. That is not a big problem as you can get all your files from the image of your old virtual machine with 7ZIP.
+
+Don't forget to save your passwords to this chat or jabber tokyo, because if you lose it, no one will help you get back.
+
+(If anyone can find a way without installing a new OS, please let me know and I will fix it)

